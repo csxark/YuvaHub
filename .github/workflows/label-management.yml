@@ -1,0 +1,59 @@
+name: Label Management
+
+on:
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  manage-labels:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+      contents: read
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Update PR Review Labels
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const repo = context.repo;
+            const pr = context.payload.pull_request;
+            const review = context.payload.review;
+
+            let targetLabel = 'needs review';
+            try {
+              if (fs.existsSync('.github/community-config.json')) {
+                const raw = fs.readFileSync('.github/community-config.json', 'utf8');
+                const config = JSON.parse(raw);
+                if (config.labels?.needs_review) {
+                  targetLabel = config.labels.needs_review;
+                }
+              }
+            } catch (err) {
+              console.log('Failed loading community-config.json:', err);
+            }
+
+            console.log(`Review submitted (${review.state}) on PR #${pr.number}.`);
+
+            // Remove 'needs review' label once a review is submitted
+            try {
+              const currentLabels = (pr.labels || []).map(l => l.name);
+              if (currentLabels.includes(targetLabel)) {
+                await github.rest.issues.removeLabel({
+                  owner: repo.owner,
+                  repo: repo.repo,
+                  issue_number: pr.number,
+                  name: targetLabel
+                });
+                console.log(`Successfully removed '${targetLabel}' label from PR #${pr.number}`);
+              } else {
+                console.log(`Label '${targetLabel}' was not present on PR #${pr.number}`);
+              }
+            } catch (err) {
+              console.log(`Error managing label '${targetLabel}' on PR #${pr.number}:`, err);
+            }

@@ -1,0 +1,211 @@
+name: PR Automation
+
+on:
+  pull_request_target:
+    types: [opened, closed]
+
+jobs:
+  pr-handler:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+      contents: read
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Process PR Event
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const repo = context.repo;
+            const pr = context.payload.pull_request;
+            const actor = pr.user.login;
+            const eventAction = context.payload.action;
+
+            // Strips common leading indentation from each line of a template
+            // literal so multi-line markdown bodies don't inherit the JS
+            // source's indentation (which YAML block scalars require).
+            function dedent(str) {
+              return str
+                .split('\n')
+                .map(line => line.trimStart())
+                .join('\n');
+            }
+
+            // Load community configuration
+            let config = {
+              links: {
+                contributing: `https://github.com/${repo.owner}/${repo.repo}/blob/main/CONTRIBUTING.md`,
+                code_of_conduct: `https://github.com/${repo.owner}/${repo.repo}/blob/main/CODE_OF_CONDUCT.md`,
+                documentation: `https://github.com/${repo.owner}/${repo.repo}/tree/main/docs`,
+                pr_template: `https://github.com/${repo.owner}/${repo.repo}/blob/main/.github/PULL_REQUEST_TEMPLATE.md`,
+                discussions: `https://github.com/${repo.owner}/${repo.repo}/discussions`,
+                discord: 'https://discord.gg/yuvahub',
+                slack: 'https://yuvahub.slack.com',
+                support: `https://github.com/${repo.owner}/${repo.repo}/issues`
+              },
+              expectations: { response_time: '24 to 48 hours' },
+              labels: { needs_review: 'needs review' },
+              pr_checklist: [
+                "Verify changes pass all local builds & tests.",
+                "Follow repository coding conventions and formatting standards.",
+                "Link the corresponding issue using keywords (e.g. `Closes #123`).",
+                "Provide a clear summary and visual screenshots/GIFs for UI modifications.",
+                "Ensure PR remains clean and free of extraneous file changes."
+              ]
+            };
+
+            try {
+              if (fs.existsSync('.github/community-config.json')) {
+                const raw = fs.readFileSync('.github/community-config.json', 'utf8');
+                config = { ...config, ...JSON.parse(raw) };
+              }
+            } catch (err) {
+              console.log('Failed loading community-config.json, using fallback:', err);
+            }
+
+            const links = config.links || {};
+
+            // 1. PR OPENED AUTOMATION
+            if (eventAction === 'opened') {
+              console.log(`Processing PR #${pr.number} opened by @${actor}...`);
+
+              let isFirstTime = false;
+              try {
+                const searchRes = await github.rest.search.issuesAndPullRequests({
+                  q: `repo:${repo.owner}/${repo.repo} type:pr author:${actor}`
+                });
+                isFirstTime = searchRes.data.total_count <= 1;
+              } catch (e) {
+                console.log('PR search API check failed, defaulting to first-time greeting:', e);
+                isFirstTime = true;
+              }
+
+              const checklistText = (config.pr_checklist || []).map(c => `- [ ] ${c}`).join('\n');
+
+              let welcomeBody = '';
+
+              if (isFirstTime) {
+                welcomeBody = dedent(`
+                  ### Welcome to ${repo.repo}, @${actor}
+
+                  Thank you for opening your first Pull Request in this repository. We appreciate your contribution.
+
+                  ---
+
+                  ### PR Submission Checklist
+                  Please confirm your PR satisfies our community standards:
+                  ${checklistText}
+
+                  ---
+
+                  ### Review Expectations & CI Status
+                  - **Continuous Integration:** Automated checks (tests, linting, title/body checks) run automatically on PR creation.
+                  - **Review SLA:** Maintainers review pull requests within **${config.expectations?.response_time || '24-48 hours'}**.
+                  - **Need Help?** Ask questions directly in this PR thread if automated checks fail.
+
+                  ---
+
+                  ### Resources & Community Links
+                  - **[Contribution Guidelines](${links.contributing})** | **[Code of Conduct](${links.code_of_conduct})**
+                  - **[Repository Documentation](${links.documentation})** | **[PR Template](${links.pr_template})**
+                  - **[Discussions](${links.discussions})** | **[Discord](${links.discord})** | **[Slack](${links.slack})** | **[Support](${links.support})**
+                `);
+              } else {
+                welcomeBody = dedent(`
+                  ### Welcome back, @${actor}
+
+                  Thank you for opening another Pull Request for **${repo.repo}**. Your continued contributions are appreciated.
+
+                  ---
+
+                  ### PR Checklist Reminder
+                  ${checklistText}
+
+                  ---
+
+                  ### Review & CI Expectations
+                  - Automated checks are currently running. Please review any failing status checks.
+                  - A maintainer will review your code shortly, typically within **${config.expectations?.response_time || '24-48 hours'}**.
+
+                  ---
+
+                  ### Useful Links
+                  - [Contribution Guide](${links.contributing}) | [Documentation](${links.documentation}) | [Discussions](${links.discussions}) | [Support](${links.support})
+                `);
+              }
+
+              // Post comment
+              await github.rest.issues.createComment({
+                owner: repo.owner,
+                repo: repo.repo,
+                issue_number: pr.number,
+                body: welcomeBody
+              });
+
+              // Add "needs review" label
+              const targetLabel = config.labels?.needs_review || 'needs review';
+              try {
+                try {
+                  await github.rest.issues.getLabel({
+                    owner: repo.owner,
+                    repo: repo.repo,
+                    name: targetLabel
+                  });
+                } catch (lblErr) {
+                  if (lblErr.status === 404) {
+                    await github.rest.issues.createLabel({
+                      owner: repo.owner,
+                      repo: repo.repo,
+                      name: targetLabel,
+                      color: 'fbca04',
+                      description: 'Requires maintainer triage or code review'
+                    });
+                  }
+                }
+
+                await github.rest.issues.addLabels({
+                  owner: repo.owner,
+                  repo: repo.repo,
+                  issue_number: pr.number,
+                  labels: [targetLabel]
+                });
+                console.log(`Added label '${targetLabel}' to PR #${pr.number}`);
+              } catch (lblAddErr) {
+                console.log('Failed adding label to PR:', lblAddErr);
+              }
+            }
+
+            // 2. PR MERGED CELEBRATION AUTOMATION
+            if (eventAction === 'closed' && pr.merged === true) {
+              console.log(`Processing celebration for merged PR #${pr.number} by @${actor}...`);
+
+              const celebrationBody = dedent(`
+                ### Congratulations @${actor} — your PR has been merged
+
+                Thank you for your contribution to **${repo.repo}**. Your work helps make this project better for everyone.
+
+                ---
+
+                ### What's Next?
+                We would welcome the opportunity to keep working with you. Some ways to stay involved:
+                - **[Explore Open Issues](https://github.com/${repo.owner}/${repo.repo}/issues)** — Find another issue that interests you
+                - **[Participate in Discussions](${links.discussions})** — Share ideas, feedback, and architectural thoughts
+                - **[Star the Repository](https://github.com/${repo.owner}/${repo.repo})** — Show your support if you haven't already
+                - **[Share the Project](https://twitter.com/intent/tweet?text=Check%20out%20YuvaHub!%20https://github.com/${repo.owner}/${repo.repo})** — Help spread the word in your network
+                - **Continue Contributing** — You are now a valued contributor to this project
+
+                Thank you again for your work.
+              `);
+
+              await github.rest.issues.createComment({
+                owner: repo.owner,
+                repo: repo.repo,
+                issue_number: pr.number,
+                body: celebrationBody
+              });
+            }

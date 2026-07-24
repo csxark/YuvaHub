@@ -15,3 +15,7 @@ Comprehensive migration guide to host the Express backend Web Service and the ba
 
 ### 4. [Custom Domain & Firebase Setup Guide (DOMAIN_SETUP.md)](./DOMAIN_SETUP.md)
 Instructions on mapping custom domains, configuring Firebase Authorized Domains to enable authentication correctly, and publishing DNS Service records (DNS-AID).
+
+### 5. [GitHub Actions Contributor Workflows (GITHUB_WORKFLOWS.md)](./GITHUB_WORKFLOWS.md)
+Comprehensive documentation detailing automated contributor onboarding, engagement, issue assignment, PR merge celebrations, label management, and workflow configuration.
+

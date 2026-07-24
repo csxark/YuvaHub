@@ -1,0 +1,40 @@
+{
+  "repository": {
+    "name": "YuvaHub",
+    "owner": "uditt490-pixel",
+    "url": "https://github.com/uditt490-pixel/YuvaHub"
+  },
+  "links": {
+    "contributing": "https://github.com/uditt490-pixel/YuvaHub/blob/main/CONTRIBUTING.md",
+    "code_of_conduct": "https://github.com/uditt490-pixel/YuvaHub/blob/main/CODE_OF_CONDUCT.md",
+    "documentation": "https://github.com/uditt490-pixel/YuvaHub/tree/main/docs",
+    "issue_templates": "https://github.com/uditt490-pixel/YuvaHub/issues/new/choose",
+    "pr_template": "https://github.com/uditt490-pixel/YuvaHub/blob/main/.github/PULL_REQUEST_TEMPLATE.md",
+    "discussions": "https://github.com/uditt490-pixel/YuvaHub/discussions",
+    "discord": "https://discord.gg/yuvahub",
+    "slack": "https://yuvahub.slack.com",
+    "support": "https://github.com/uditt490-pixel/YuvaHub/issues"
+  },
+  "expectations": {
+    "response_time": "24 to 48 hours"
+  },
+  "labels": {
+    "needs_review": "needs review"
+  },
+  "working_ethics": [
+    "Work strictly on assigned issues to avoid duplicate efforts.",
+    "Keep maintainers regularly updated on your progress.",
+    "Ask questions in the issue thread whenever you hit a blocker.",
+    "Avoid force-pushing commits without clear reason or maintainer alignment.",
+    "Submit clean, focused Pull Requests that address a single concern.",
+    "Follow repository coding standards and format guidelines.",
+    "Be respectful, patient, and collaborative with fellow contributors."
+  ],
+  "pr_checklist": [
+    "Verify changes pass all local builds & tests (`npm test` / `npm run dev`).",
+    "Follow coding conventions and formatting guidelines.",
+    "Link the corresponding issue using keywords (e.g. `Closes #123`).",
+    "Provide clear description and visual screenshots/GIFs for UI changes.",
+    "Keep PR focused and refrain from unrelated formatting or file edits."
+  ]
+}

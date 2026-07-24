@@ -1,0 +1,223 @@
+name: Issue Automation
+
+on:
+  issues:
+    types: [opened, assigned]
+
+jobs:
+  issue-handler:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Process Issue Event
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const repo = context.repo;
+            const actor = context.actor;
+            const issue = context.payload.issue;
+            const eventAction = context.payload.action;
+
+            // Strips common leading indentation from each line of a template
+            // literal so multi-line markdown bodies don't inherit the JS
+            // source's indentation (which YAML block scalars require).
+            function dedent(str) {
+              return str
+                .split('\n')
+                .map(line => line.trimStart())
+                .join('\n');
+            }
+
+            // Load community configuration
+            let config = {
+              links: {
+                contributing: `https://github.com/${repo.owner}/${repo.repo}/blob/main/CONTRIBUTING.md`,
+                code_of_conduct: `https://github.com/${repo.owner}/${repo.repo}/blob/main/CODE_OF_CONDUCT.md`,
+                documentation: `https://github.com/${repo.owner}/${repo.repo}/tree/main/docs`,
+                issue_templates: `https://github.com/${repo.owner}/${repo.repo}/issues/new/choose`,
+                discussions: `https://github.com/${repo.owner}/${repo.repo}/discussions`,
+                discord: 'https://discord.gg/yuvahub',
+                slack: 'https://yuvahub.slack.com',
+                support: `https://github.com/${repo.owner}/${repo.repo}/issues`
+              },
+              expectations: { response_time: '24 to 48 hours' },
+              labels: { needs_review: 'needs review' },
+              working_ethics: [
+                "Work strictly on assigned issues to avoid duplicate efforts.",
+                "Keep maintainers regularly updated on your progress.",
+                "Ask questions in the issue thread whenever you hit a blocker.",
+                "Avoid force-pushing commits without clear reason or maintainer alignment.",
+                "Submit clean, focused Pull Requests that address a single concern.",
+                "Follow repository coding standards and format guidelines.",
+                "Be respectful, patient, and collaborative with fellow contributors."
+              ]
+            };
+
+            try {
+              if (fs.existsSync('.github/community-config.json')) {
+                const raw = fs.readFileSync('.github/community-config.json', 'utf8');
+                config = { ...config, ...JSON.parse(raw) };
+              }
+            } catch (err) {
+              console.log('Failed loading community-config.json, using fallback:', err);
+            }
+
+            const links = config.links || {};
+
+            // 1. ISSUE OPENED AUTOMATION
+            if (eventAction === 'opened') {
+              console.log(`Processing issue opened by ${actor}...`);
+
+              // Check if first time or returning issue creator
+              let isFirstTime = false;
+              try {
+                const searchRes = await github.rest.search.issuesAndPullRequests({
+                  q: `repo:${repo.owner}/${repo.repo} type:issue author:${actor}`
+                });
+                isFirstTime = searchRes.data.total_count <= 1;
+              } catch (e) {
+                console.log('Search API check failed, defaulting to first-time greeting:', e);
+                isFirstTime = true;
+              }
+
+              let welcomeBody = '';
+
+              if (isFirstTime) {
+                welcomeBody = dedent(`
+                  ### Welcome to ${repo.repo}, @${actor}
+
+                  Thank you for opening your first issue in this repository. We appreciate you taking the time to contribute, and we look forward to working with you.
+
+                  ---
+
+                  ### Essential Repository Resources
+                  Before proceeding, please review the following:
+                  - **[Contribution Guidelines](${links.contributing})** — Guidelines for issue reporting and workflow
+                  - **[Code of Conduct](${links.code_of_conduct})** — Our community standards and expectations
+                  - **[Repository Documentation](${links.documentation})** — Architectural overviews and setup guides
+                  - **[Issue Templates & Guidelines](${links.issue_templates})** — Standard formats for reporting issues
+
+                  ---
+
+                  ### Community & Support Channels
+                  - **[GitHub Discussions](${links.discussions})** — Join community conversations
+                  - **[Discord Community](${links.discord})** — Connect with maintainers and contributors
+                  - **[Slack Channel](${links.slack})** — Real-time collaboration
+                  - **[Support Channels](${links.support})** — Get help with setup or questions
+
+                  ---
+
+                  ### Ways to Support the Project
+                  - **[Star this Repository](https://github.com/${repo.owner}/${repo.repo})** — If you find YuvaHub useful
+                  - **[Fork the Repository](https://github.com/${repo.owner}/${repo.repo}/fork)** — To prepare and submit your improvements
+
+                  > [!NOTE]
+                  > **Maintainer Response Expectations:** Our team actively reviews issues. You can expect a response within **${config.expectations?.response_time || '24-48 hours'}**.
+                `);
+              } else {
+                welcomeBody = dedent(`
+                  ### Welcome back, @${actor}
+
+                  Thank you for submitting another issue to **${repo.repo}**. Your continued contributions are valued by our community.
+
+                  ---
+
+                  ### Quick Links Reminder
+                  - [Contribution Guidelines](${links.contributing}) | [Code of Conduct](${links.code_of_conduct})
+                  - [Repository Documentation](${links.documentation}) | [Discussions](${links.discussions})
+                  - [Discord](${links.discord}) | [Slack](${links.slack})
+
+                  > [!NOTE]
+                  > **Maintainer Response Expectations:** Maintainers will review this issue shortly, typically within **${config.expectations?.response_time || '24-48 hours'}**.
+                `);
+              }
+
+              // Post comment
+              await github.rest.issues.createComment({
+                owner: repo.owner,
+                repo: repo.repo,
+                issue_number: issue.number,
+                body: welcomeBody
+              });
+
+              // Add "needs review" label
+              const targetLabel = config.labels?.needs_review || 'needs review';
+              try {
+                // Ensure label exists
+                try {
+                  await github.rest.issues.getLabel({
+                    owner: repo.owner,
+                    repo: repo.repo,
+                    name: targetLabel
+                  });
+                } catch (lblErr) {
+                  if (lblErr.status === 404) {
+                    await github.rest.issues.createLabel({
+                      owner: repo.owner,
+                      repo: repo.repo,
+                      name: targetLabel,
+                      color: 'fbca04',
+                      description: 'Requires maintainer triage or code review'
+                    });
+                  }
+                }
+
+                await github.rest.issues.addLabels({
+                  owner: repo.owner,
+                  repo: repo.repo,
+                  issue_number: issue.number,
+                  labels: [targetLabel]
+                });
+                console.log(`Added label '${targetLabel}' to issue #${issue.number}`);
+              } catch (lblAddErr) {
+                console.log('Failed adding label to issue:', lblAddErr);
+              }
+            }
+
+            // 2. ISSUE ASSIGNED AUTOMATION
+            if (eventAction === 'assigned') {
+              const assignee = context.payload.assignee;
+              if (!assignee) return;
+
+              console.log(`Processing issue #${issue.number} assigned to @${assignee.login}...`);
+
+              const ethicsList = (config.working_ethics || []).map(e => `- ${e}`).join('\n');
+
+              const assignmentBody = dedent(`
+                ### Issue Assigned: @${assignee.login}
+
+                This issue **#${issue.number}** has been officially assigned to you. Thank you for taking this on.
+
+                ---
+
+                ### Recommended Working Ethics
+                To maintain a high standard of quality and smooth collaboration, please keep the following in mind:
+                ${ethicsList}
+
+                ---
+
+                ### Useful Resources & Next Steps
+                - **[Development Setup & Contribution Guide](${links.contributing})**
+                - **[Project Documentation](${links.documentation})**
+                - **[GitHub Discussions](${links.discussions})**
+                - **[Discord Community](${links.discord})**
+                - **[Slack Channel](${links.slack})**
+                - **[Support Channels](${links.support})**
+
+                If you encounter any blockers or have questions, please comment in this thread. We look forward to your contribution.
+              `);
+
+              await github.rest.issues.createComment({
+                owner: repo.owner,
+                repo: repo.repo,
+                issue_number: issue.number,
+                body: assignmentBody
+              });
+            }
